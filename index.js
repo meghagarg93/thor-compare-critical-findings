@@ -9,29 +9,29 @@ var latestImageTag = '';
 var previousImageTag = '';
 var repositoryARN;
 var repositoryName;
-var criticalCount;
-var highCount;
-var mediumCount;
-var lowCount;
 var latestCriticalCount;
 var latestHighCount;
 var latestMediumCount;
 var latestLowCount;
-var latestCount;
+var latestTotalCount;
+var latestOtherCount;
 var previousCriticalCount;
 var previousHighCount;
 var previousLowCount;
 var previousMediumCount;
-var previousCount;
-
+var previousTotalCount;
+var previousOtherCount;
+const maxRepoNameLength = 80;
+var truncatedRepoName;
 
 var messageDetails = {
   OverallStatus: '',
-  New_Critical_Vurnerabilities: '',
-  New_High_Vurnerabilities: '',
+  New_Critical_Vulnerabilities: '',
+  New_High_Vulnerabilities: '',
   New_Medium_Vurnerabilites: '',
-  New_Low_Vurnerabilities: '',
-  New_Total_Vurnerabilities: '',
+  New_Low_Vulnerabilities: '',
+  New_Other_Vulnerabilities: '',
+  New_Total_Vulnerabilities: '',
   Inspector_Scan_Event_Latest_Image: {}
 };
 
@@ -39,76 +39,112 @@ var messageDetails = {
 async function getInspectorCriticalFindingsForImage(imageDigest) {
   // Retrieve the findings for the image from AWS Inspector
 
-  var paramsCritical = {
-    filterCriteria: {
-      ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
-      severity: [{ comparison: "EQUALS", value: "CRITICAL" }],
-      findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
-    },
-    maxResults: 100,
+  var nextToken = undefined;
+  var criticalCount = 0;
+  do {
+    var params = {
+      filterCriteria: {
+        ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
+        severity: [{ comparison: "EQUALS", value: "CRITICAL" }],
+        findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
+      },
+      maxResults: 100,
+      nextToken: nextToken
+    };
+    var res = await inspector.listFindings(params).promise();
+    criticalCount += res.findings.length;
+    nextToken = res.nextToken;
   }
-  var resCritical = await inspector.listFindings(paramsCritical).promise();
-  criticalCount = resCritical.findings.length;
-
+  while (nextToken)
   return criticalCount;
 }
 
 async function getInspectorHighFindingsForImage(imageDigest) {
   // Retrieve the findings for the image from AWS Inspector
 
-  var paramsHigh = {
-    filterCriteria: {
-      ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
-      severity: [{ comparison: "EQUALS", value: "HIGH" }],
-      findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
-    },
-    maxResults: 100,
+  var nextToken = undefined;
+  var highCount = 0;
+  do {
+    var params = {
+      filterCriteria: {
+        ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
+        severity: [{ comparison: "EQUALS", value: "HIGH" }],
+        findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
+      },
+      maxResults: 100,
+      nextToken: nextToken
+    };
+    var res = await inspector.listFindings(params).promise();
+    highCount += res.findings.length;
+    nextToken = res.nextToken;
   }
-  var resHigh = await inspector.listFindings(paramsHigh).promise();
-  highCount = resHigh.findings.length;
-
+  while (nextToken)
   return highCount;
 }
+
 async function getInspectorMediumFindingsForImage(imageDigest) {
   // Retrieve the findings for the image from AWS Inspector
-
-  var paramsMedium = {
-    filterCriteria: {
-      ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
-      severity: [{ comparison: "EQUALS", value: "MEDIUM" }],
-      findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
-    },
-    maxResults: 100,
+  var nextToken = undefined;
+  var mediumCount = 0;
+  do {
+    var params = {
+      filterCriteria: {
+        ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
+        severity: [{ comparison: "EQUALS", value: "MEDIUM" }],
+        findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
+      },
+      maxResults: 100,
+      nextToken: nextToken
+    };
+    var res = await inspector.listFindings(params).promise();
+    mediumCount += res.findings.length;
+    nextToken = res.nextToken;
   }
-  var resMedium = await inspector.listFindings(paramsMedium).promise();
-  mediumCount = resMedium.findings.length;
-
+  while (nextToken)
   return mediumCount;
 }
 async function getInspectorLowFindingsForImage(imageDigest) {
   // Retrieve the findings for the image from AWS Inspector
-
-  var paramsLow = {
-    filterCriteria: {
-      ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
-      severity: [{ comparison: "EQUALS", value: "LOW" }],
-      findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
-    },
-    maxResults: 100,
+  var nextToken = undefined;
+  var lowCount = 0;
+  do {
+    var params = {
+      filterCriteria: {
+        ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
+        severity: [{ comparison: "EQUALS", value: "LOW" }],
+        findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
+      },
+      maxResults: 100,
+      nextToken: nextToken
+    };
+    var res = await inspector.listFindings(params).promise();
+    lowCount += res.findings.length;
+    nextToken = res.nextToken;
   }
-  var resLow = await inspector.listFindings(paramsLow).promise();
-  lowCount = resLow.findings.length;
-
+  while (nextToken)
   return lowCount;
 }
 
-// async function countCriticalVulnerabilities(imageDigest) {
-//   // Get the vulnerability findings for the image
-//   var findings = await getInspectorFindingsForImage(imageDigest);
-
-//   // Calculate the count of critical vulnerabilities
-//   return findings.length;
-// }
+async function getInspectorAllFindingsForImage(imageDigest) {
+  // Retrieve the findings for the image from AWS Inspector
+  var nextToken = undefined;
+  var totalCount = 0;
+  do {
+    var params = {
+      filterCriteria: {
+        ecrImageHash: [{ comparison: "EQUALS", value: imageDigest }],
+        findingStatus: [{ comparison: "EQUALS", value: "ACTIVE" }]
+      },
+      maxResults: 100,
+      nextToken: nextToken
+    };
+    var res = await inspector.listFindings(params).promise();
+    totalCount += res.findings.length;
+    nextToken = res.nextToken;
+  }
+  while (nextToken);
+  return totalCount;
+}
 
 async function getLatestAndPreviousImageDigest(repositoryName) {
   // Get the list of image details in the repository
@@ -136,48 +172,48 @@ exports.handler = async (event, context) => {
   repositoryARN = event.detail['repository-name'];
   repositoryName = repositoryARN.split("/").pop();
 
+  truncatedRepoName = repositoryName.substring(0, maxRepoNameLength);
+
   try {
     // Get the image digests for the latest and latest-1 images in the repository
     var { latestImageDigest, previousImageDigest, latestImageTag, previousImageTag } = await getLatestAndPreviousImageDigest(repositoryName);
 
     // Get the vulnerability counts for the latest image
+
     latestCriticalCount = await getInspectorCriticalFindingsForImage(latestImageDigest);
     latestHighCount = await getInspectorHighFindingsForImage(latestImageDigest);
     latestMediumCount = await getInspectorMediumFindingsForImage(latestImageDigest);
     latestLowCount = await getInspectorLowFindingsForImage(latestImageDigest);
-    console.log("in Main function: " + latestCriticalCount + "\t" + latestHighCount + "\t" + latestMediumCount + "\t" + latestLowCount)
+    latestTotalCount = await getInspectorAllFindingsForImage(latestImageDigest);
+    latestOtherCount = latestTotalCount - (latestCriticalCount + latestHighCount + latestMediumCount + latestLowCount);
 
-    latestCount = latestCriticalCount + latestHighCount + latestMediumCount + latestLowCount;
+    console.log("in Main function: " + latestCriticalCount + "\t" + latestHighCount + "\t" + latestMediumCount + "\t" + latestLowCount + "\t" + latestOtherCount + "\t" + latestTotalCount)
 
-    console.log("latestCount: " + latestCount);
     // Compare the counts with the latest-1 image and take appropriate actions
     if (previousImageDigest) {
       previousCriticalCount = await getInspectorCriticalFindingsForImage(previousImageDigest);
       previousHighCount = await getInspectorHighFindingsForImage(previousImageDigest);
       previousMediumCount = await getInspectorMediumFindingsForImage(previousImageDigest);
       previousLowCount = await getInspectorLowFindingsForImage(previousImageDigest);
-      console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount)
-      previousCount = previousCriticalCount + previousHighCount + previousMediumCount + previousLowCount;
+      previousTotalCount = await getInspectorAllFindingsForImage(previousImageDigest);
+      previousOtherCount = previousTotalCount - (previousCriticalCount + previousHighCount + previousMediumCount + previousLowCount);
 
-
-      console.log("previousCount: " + previousCount);
-
-
+      console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount + "\t" + previousOtherCount + "\t" + previousTotalCount);
 
       if (latestCriticalCount > previousCriticalCount) {
-        messageDetails.OverallStatus = 'Fail !! Vurnerability has increased with the new deployment';
+        messageDetails.OverallStatus = 'Fail !! Critical Vulnerabilities have increased with the new deployment.';
       } else if (latestCriticalCount < previousCriticalCount) {
-        messageDetails.OverallStatus = 'The latest image has fewer critical vulnerabilities than the previous image.';
+        messageDetails.OverallStatus = 'Pass !! Critical Vulnerabilities have reduced with the new deployment.';
       } else {
-        messageDetails.OverallStatus = 'No change in Critical vulnerabilities count';
+        messageDetails.OverallStatus = 'No change in Critical vulnerabilities Count.';
       }
 
-
-      messageDetails.New_Critical_Vurnerabilities = latestCriticalCount - previousCriticalCount;
-      messageDetails.New_High_Vurnerabilities = latestHighCount - previousHighCount;
-      messageDetails.New_Medium_Vurnerabilites = latestMediumCount - previousMediumCount;
-      messageDetails.New_Low_Vurnerabilities = latestLowCount - previousLowCount;
-      messageDetails.New_Total_Vurnerabilities = latestCount - previousCount;
+      messageDetails.New_Critical_Vulnerabilities = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
+      messageDetails.New_High_Vulnerabilities = `${latestHighCount} (Change = ${latestHighCount - previousHighCount})`;
+      messageDetails.New_Medium_Vurnerabilites = `${latestMediumCount} (Change = ${latestMediumCount - previousMediumCount})`;
+      messageDetails.New_Low_Vulnerabilities = `${latestLowCount} (Change = ${latestLowCount - previousLowCount})`;
+      messageDetails.New_Other_Vulnerabilities = `${latestOtherCount} (Change = ${latestOtherCount - previousOtherCount})`;
+      messageDetails.New_Total_Vulnerabilities = `${latestTotalCount} (Change = ${latestTotalCount - previousTotalCount})`;
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
@@ -199,7 +235,7 @@ exports.handler = async (event, context) => {
       const params = {
         TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
         Message: table,
-        Subject: `[${repositoryName}] | [Thor] | [${latestImageTag}]`,
+        Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
 
 
@@ -207,14 +243,15 @@ exports.handler = async (event, context) => {
     }
     else {
 
-      messageDetails.New_Critical_Vurnerabilities = latestCriticalCount;
-      messageDetails.New_High_Vurnerabilities = latestHighCount;
+      messageDetails.New_Critical_Vulnerabilities = latestCriticalCount;
+      messageDetails.New_High_Vulnerabilities = latestHighCount;
       messageDetails.New_Medium_Vurnerabilites = latestMediumCount;
-      messageDetails.New_Low_Vurnerabilities = latestLowCount;
-      messageDetails.New_Total_Vurnerabilities = latestCount;
+      messageDetails.New_Low_Vulnerabilities = latestLowCount;
+      messageDetails.New_Other_Vulnerabilities = latestOtherCount;
+      messageDetails.New_Total_Vulnerabilities = latestTotalCount;
 
       console.log("message: " + JSON.stringify(messageDetails))
-      messageDetails.OverallStatus = 'There is only one image present for the repository. No Previous image found';
+      messageDetails.OverallStatus = 'There is only one image present for the repository. No Previous image found for Comparision.';
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
@@ -236,7 +273,7 @@ exports.handler = async (event, context) => {
       const params = {
         TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
         Message: table,
-        Subject: `[${repositoryName}] | [Thor] | [${latestImageTag}]`,
+        Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
 
 
@@ -250,7 +287,13 @@ exports.handler = async (event, context) => {
     };
   } catch (error) {
     console.error('Error:', error);
-    // Handle any errors that occurred during processing
+
+    const params = {
+      TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+      Message: `Repository Name: ${repositoryName}\n\nError while exceuting comparision:\n ${JSON.stringify(error)}`,
+      Subject: `Error in Inspector Scan | Thor | ${latestImageTag}`
+    };
+    await sns.publish(params).promise();
     throw error;
   }
 };
