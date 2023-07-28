@@ -25,13 +25,12 @@ const maxRepoNameLength = 80;
 var truncatedRepoName;
 
 var messageDetails = {
-  OverallStatus: '',
-  New_Critical_Vulnerabilities: '',
-  New_High_Vulnerabilities: '',
-  New_Medium_Vurnerabilites: '',
-  New_Low_Vulnerabilities: '',
-  New_Other_Vulnerabilities: '',
-  New_Total_Vulnerabilities: '',
+  Critical: '',
+  High: '',
+  Medium: '',
+  Low: '',
+  Other: '',
+  Total: '',
   Inspector_Scan_Event_Latest_Image: {}
 };
 
@@ -200,20 +199,20 @@ exports.handler = async (event, context) => {
 
       console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount + "\t" + previousOtherCount + "\t" + previousTotalCount);
 
-      if (latestCriticalCount > previousCriticalCount) {
-        messageDetails.OverallStatus = 'Fail !! Critical Vulnerabilities have increased with the new deployment.';
-      } else if (latestCriticalCount < previousCriticalCount) {
-        messageDetails.OverallStatus = 'Pass !! Critical Vulnerabilities have reduced with the new deployment.';
-      } else {
-        messageDetails.OverallStatus = 'No change in Critical vulnerabilities Count.';
-      }
+      // if (latestCriticalCount > previousCriticalCount) {
+      //   messageDetails.OverallStatus = 'Fail !! Critical Vulnerabilities have increased with the new deployment.';
+      // } else if (latestCriticalCount < previousCriticalCount) {
+      //   messageDetails.OverallStatus = 'Pass !! Critical Vulnerabilities have reduced with the new deployment.';
+      // } else {
+      //   messageDetails.OverallStatus = 'No change in Critical vulnerabilities Count.';
+      // }
 
-      messageDetails.New_Critical_Vulnerabilities = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
-      messageDetails.New_High_Vulnerabilities = `${latestHighCount} (Change = ${latestHighCount - previousHighCount})`;
-      messageDetails.New_Medium_Vurnerabilites = `${latestMediumCount} (Change = ${latestMediumCount - previousMediumCount})`;
-      messageDetails.New_Low_Vulnerabilities = `${latestLowCount} (Change = ${latestLowCount - previousLowCount})`;
-      messageDetails.New_Other_Vulnerabilities = `${latestOtherCount} (Change = ${latestOtherCount - previousOtherCount})`;
-      messageDetails.New_Total_Vulnerabilities = `${latestTotalCount} (Change = ${latestTotalCount - previousTotalCount})`;
+      messageDetails.Critical = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
+      messageDetails.High = `${latestHighCount} (Change = ${latestHighCount - previousHighCount})`;
+      messageDetails.Medium = `${latestMediumCount} (Change = ${latestMediumCount - previousMediumCount})`;
+      messageDetails.Low = `${latestLowCount} (Change = ${latestLowCount - previousLowCount})`;
+      messageDetails.Other = `${latestOtherCount} (Change = ${latestOtherCount - previousOtherCount})`;
+      messageDetails.Total = `${latestTotalCount} (Change = ${latestTotalCount - previousTotalCount})`;
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
@@ -222,7 +221,7 @@ exports.handler = async (event, context) => {
           }
 
           if (key === 'Inspector_Scan_Event_Latest_Image') {
-            key = '\n' + key;
+            key = '\n' + `${key}`;
           }
 
           return `${key} : ${value}`;
@@ -243,15 +242,15 @@ exports.handler = async (event, context) => {
     }
     else {
 
-      messageDetails.New_Critical_Vulnerabilities = latestCriticalCount;
-      messageDetails.New_High_Vulnerabilities = latestHighCount;
-      messageDetails.New_Medium_Vurnerabilites = latestMediumCount;
-      messageDetails.New_Low_Vulnerabilities = latestLowCount;
-      messageDetails.New_Other_Vulnerabilities = latestOtherCount;
-      messageDetails.New_Total_Vulnerabilities = latestTotalCount;
+      messageDetails.Critical = latestCriticalCount;
+      messageDetails.High = latestHighCount;
+      messageDetails.Medium = latestMediumCount;
+      messageDetails.Low = latestLowCount;
+      messageDetails.Other = latestOtherCount;
+      messageDetails.Total = latestTotalCount;
 
       console.log("message: " + JSON.stringify(messageDetails))
-      messageDetails.OverallStatus = 'There is only one image present for the repository. No Previous image found for Comparision.';
+      // messageDetails.OverallStatus = 'There is only one image present for the repository. No Previous image found for Comparision.';
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
