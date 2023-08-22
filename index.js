@@ -2,6 +2,7 @@ const AWS = require('aws-sdk');
 const inspector = new AWS.Inspector2({ region: 'us-west-2' });
 const ecr = new AWS.ECR({ region: 'us-west-2' });
 const sns = new AWS.SNS({ region: 'us-west-2' });
+const eventBridge = new AWS.EventBridge({ region: 'us-west-2' });
 
 var latestImageDigest = '';
 var previousImageDigest = '';
@@ -9,16 +10,8 @@ var latestImageTag = '';
 var previousImageTag = '';
 var repositoryARN;
 var repositoryName;
-var latestCriticalCount;
-var latestHighCount;
-var latestMediumCount;
-var latestLowCount;
 var latestTotalCount;
 var latestOtherCount;
-var previousCriticalCount;
-var previousHighCount;
-var previousLowCount;
-var previousMediumCount;
 var previousTotalCount;
 var previousOtherCount;
 const maxRepoNameLength = 80;
@@ -39,6 +32,7 @@ async function getInspectorFindingsForImage(imageDigest, severity) {
   // Retrieve the findings for the image from AWS Inspector
 
   var nextToken = undefined;
+  var findings = []; // Array to store findings
   var Count = 0;
   do {
     var params = {
@@ -51,11 +45,18 @@ async function getInspectorFindingsForImage(imageDigest, severity) {
       nextToken: nextToken
     };
     var res = await inspector.listFindings(params).promise();
+
+    findings.push(...res.findings);
+
     Count += res.findings.length;
     nextToken = res.nextToken;
   }
   while (nextToken)
-  return Count;
+
+  // Extract finding titles from findings
+  const findingTitles = findings.map(finding => finding.title);
+
+  return { Count, findingTitles };
 }
 
 async function getInspectorAllFindingsForImage(imageDigest) {
@@ -97,6 +98,27 @@ async function getLatestAndPreviousImageDigest(repositoryName) {
 
 }
 
+async function sendEventToEventBridge(repositoryName, imageTag, status) {
+  const event = {
+    Source: "lambda", // Replace with your event source
+    DetailType: "ImageDeployment",
+    Detail: JSON.stringify({
+      repositoryName: repositoryName,
+      imageTag: imageTag,
+      status: status
+    })
+  };
+
+  const params = {
+    Entries: [event],
+  };
+
+  console.log("event: " + JSON.stringify(event));
+
+  const result = await eventBridge.putEvents(params).promise(); // Wait for the promise to resolve
+  return result;
+}
+
 exports.handler = async (event, context) => {
   // Retrieve the repository name from the EventBridge event
 
@@ -112,11 +134,17 @@ exports.handler = async (event, context) => {
     var { latestImageDigest, previousImageDigest, latestImageTag, previousImageTag } = await getLatestAndPreviousImageDigest(repositoryName);
 
     // Get the vulnerability counts for the latest image
+    // latestFindingsInfo = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
 
-    latestCriticalCount = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
-    latestHighCount = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
-    latestMediumCount = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
-    latestLowCount = await getInspectorFindingsForImage(latestImageDigest, "LOW");
+    const { Count: latestCriticalCount, findingTitles: latestCriticalFindingTitles } = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
+    const { Count: latestHighCount } = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
+    const { Count: latestMediumCount } = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
+    const { Count: latestLowCount } = await getInspectorFindingsForImage(latestImageDigest, "LOW");
+
+    // latestCriticalCount = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
+    // latestHighCount = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
+    // latestMediumCount = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
+    // latestLowCount = await getInspectorFindingsForImage(latestImageDigest, "LOW");
     latestTotalCount = await getInspectorAllFindingsForImage(latestImageDigest);
     latestOtherCount = latestTotalCount - (latestCriticalCount + latestHighCount + latestMediumCount + latestLowCount);
 
@@ -124,10 +152,17 @@ exports.handler = async (event, context) => {
 
     // Compare the counts with the latest-1 image and take appropriate actions
     if (previousImageDigest) {
-      previousCriticalCount = await getInspectorFindingsForImage(previousImageDigest, "CRITICAL");
-      previousHighCount = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
-      previousMediumCount = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
-      previousLowCount = await getInspectorFindingsForImage(previousImageDigest, "LOW");
+
+      const { Count: previousCriticalCount, findingTitles: previousCriticalFindingTitles } = await getInspectorFindingsForImage(previousImageDigest, "CRITICAL");
+      const { Count: previousHighCount } = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
+      const { Count: previousMediumCount } = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
+      const { Count: previousLowCount } = await getInspectorFindingsForImage(previousImageDigest, "LOW");
+
+
+      // previousCriticalCount = await getInspectorFindingsForImage(previousImageDigest, "CRITICAL");
+      // previousHighCount = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
+      // previousMediumCount = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
+      // previousLowCount = await getInspectorFindingsForImage(previousImageDigest, "LOW");
       previousTotalCount = await getInspectorAllFindingsForImage(previousImageDigest);
       previousOtherCount = previousTotalCount - (previousCriticalCount + previousHighCount + previousMediumCount + previousLowCount);
 
@@ -141,12 +176,36 @@ exports.handler = async (event, context) => {
       //   messageDetails.OverallStatus = 'No change in Critical vulnerabilities Count.';
       // }
 
+
+      const newFindings = latestCriticalFindingTitles.filter(title => !previousCriticalFindingTitles.includes(title));
+      const resolvedFindings = previousCriticalFindingTitles.filter(title => !latestCriticalFindingTitles.includes(title));
+
       messageDetails.Critical = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
       messageDetails.High = `${latestHighCount} (Change = ${latestHighCount - previousHighCount})`;
       messageDetails.Medium = `${latestMediumCount} (Change = ${latestMediumCount - previousMediumCount})`;
       messageDetails.Low = `${latestLowCount} (Change = ${latestLowCount - previousLowCount})`;
       messageDetails.Other = `${latestOtherCount} (Change = ${latestOtherCount - previousOtherCount})`;
       messageDetails.Total = `${latestTotalCount} (Change = ${latestTotalCount - previousTotalCount})`;
+      messageDetails.latestCriticalFindingTitles = `${latestCriticalFindingTitles.join(', ')}`
+      messageDetails.previousCriticalFindingTitles = `${previousCriticalFindingTitles.join(', ')}`
+
+      if (newFindings > 0) {
+        messageDetails.Staus = "NEW_CRITICAL_VULNERABILITY_ADDED"
+        messageDetails.NewFindings = `${newFindings.join(', ')}`
+        //send message to SNS that deployment event is not sent
+        const params = {
+          TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+          Message: "Image deployment event is not triggered as new vulnerabilities are added",
+          Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
+        };
+
+      }
+      else {
+        messageDetails.Status = "NO_NEW_CRITICAL_VULNERABILITY_ADDED"
+        delete messageDetails.newFindings;
+        await sendEventToEventBridge(truncatedRepoName, latestImageTag, messageDetails.Status);
+      }
+
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
@@ -154,7 +213,7 @@ exports.handler = async (event, context) => {
             value = JSON.stringify(value);
           }
 
-          if (key === 'Inspector_Scan_Event_Latest_Image') {
+          if (key === 'Inspector_Scan_Event_Latest_Image' | key === 'latestCriticalFindingTitles' | key === 'previousCriticalFindingTitles' | key === 'Status' | key === 'NEW_CRITICAL_VULNERABILITY_ADDED') {
             key = '\n' + `${key}`;
           }
 
@@ -207,6 +266,8 @@ exports.handler = async (event, context) => {
 
       await sns.publish(params).promise();
     }
+
+    // await sendEventToEventBridge(truncatedRepoName, latestImageTag, messageDetails.Status);
 
     // Return a success response
     return {
