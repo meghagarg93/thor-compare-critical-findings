@@ -203,7 +203,7 @@ exports.handler = async (event, context) => {
       else {
         messageDetails.Status = "NO_NEW_CRITICAL_VULNERABILITY_ADDED"
         delete messageDetails.newFindings;
-        await sendEventToEventBridge(truncatedRepoName, latestImageTag, messageDetails.Status);
+        await sendEventToEventBridge(repositoryName, latestImageTag, messageDetails.Status);
       }
 
 
