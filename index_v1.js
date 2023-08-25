@@ -3,13 +3,6 @@ const inspector = new AWS.Inspector2({ region: 'us-west-2' });
 const ecr = new AWS.ECR({ region: 'us-west-2' });
 const sns = new AWS.SNS({ region: 'us-west-2' });
 const eventBridge = new AWS.EventBridge({ region: 'us-west-2' });
-const codepipeline = new AWS.CodePipeline({ region: 'us-west-2' });
-
-const pipelineRepoMapping = {
-  'test-aws-inspector-result-output': 'test-inspector-output',
-  'ecrrepositorydashboard-eql8qoibf1cp': 'dls-asgard-thor-Dashboard'
-  // Add more mappings as needed
-};
 
 var latestImageDigest = '';
 var previousImageDigest = '';
@@ -23,7 +16,6 @@ var previousTotalCount;
 var previousOtherCount;
 const maxRepoNameLength = 80;
 var truncatedRepoName;
-var pipelineName;
 
 var messageDetails = {
   Critical: '',
@@ -127,70 +119,6 @@ async function sendEventToEventBridge(repositoryName, imageTag, status) {
   return result;
 }
 
-async function getPipelineNameByRepoName(repositoryName) {
-  pipelineName = pipelineRepoMapping[repositoryName];
-  if (!pipelineName) {
-    throw new Error(`Pipeline name not found for repo: ${repositoryName}`);
-  }
-  return pipelineName;
-}
-
-async function getApprovalToken(repositoryName) {
-  try {
-    pipelineName = await getPipelineNameByRepoName(repositoryName);
-
-    const maxRetryAttempts = 3;
-    const retryDelayMilliseconds = 60000; // 1 minute in milliseconds
-
-    for (let retryAttempt = 1; retryAttempt <= maxRetryAttempts; retryAttempt++) {
-      try {
-        const response = await codepipeline.getPipelineState({ name: pipelineName }).promise();
-        // Find the approval stage and get the approval token if it exists
-        const approvalStage = response.stageStates.find(stage => stage.stageName === 'Approval');
-        if (approvalStage) {
-          const approvalToken = approvalStage?.actionStates.find(action => action.actionName === 'Approval')?.latestExecution?.token;
-          if (approvalToken) {
-            return approvalToken;
-          }
-        }
-        else {
-          console.log('Approval stage not found in the pipeline.');
-          return null;
-        }
-        console.log(`Attempt ${retryAttempt}: Approval token not found. Retrying in 1 minute...`);
-        await sleep(retryDelayMilliseconds); // Function to sleep for the specified time
-      }
-      catch (error) {
-        console.error(`Attempt ${retryAttempt}: Error getting approval token:`, error);
-        await sleep(retryDelayMilliseconds);
-      }
-    }
-    throw new Error(`Failed to obtain approval token after ${maxRetryAttempts} attempts.`);
-  } catch (error) {
-    console.error('Error getting pipeline name:', error);
-    return null; // Return null to indicate error getting pipeline name
-  }
-}
-
-async function sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage) {
-  const params = {
-    pipelineName,
-    stageName: 'Approval',
-    actionName: 'Approval',
-    token: approvalToken,
-    result: {
-      summary: approvalMessage,
-      status: approvalStatus  // 'Approved' or 'Rejected'
-    }
-  };
-
-  return codepipeline.putApprovalResult(params).promise();
-}
-
-function sleep(milliseconds) {
-  return new Promise(resolve => setTimeout(resolve, milliseconds));
-}
-
 exports.handler = async (event, context) => {
   // Retrieve the repository name from the EventBridge event
 
@@ -212,6 +140,11 @@ exports.handler = async (event, context) => {
     const { Count: latestHighCount } = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
     const { Count: latestMediumCount } = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
     const { Count: latestLowCount } = await getInspectorFindingsForImage(latestImageDigest, "LOW");
+
+    // latestCriticalCount = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
+    // latestHighCount = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
+    // latestMediumCount = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
+    // latestLowCount = await getInspectorFindingsForImage(latestImageDigest, "LOW");
     latestTotalCount = await getInspectorAllFindingsForImage(latestImageDigest);
     latestOtherCount = latestTotalCount - (latestCriticalCount + latestHighCount + latestMediumCount + latestLowCount);
 
@@ -224,10 +157,25 @@ exports.handler = async (event, context) => {
       const { Count: previousHighCount } = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
       const { Count: previousMediumCount } = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
       const { Count: previousLowCount } = await getInspectorFindingsForImage(previousImageDigest, "LOW");
+
+
+      // previousCriticalCount = await getInspectorFindingsForImage(previousImageDigest, "CRITICAL");
+      // previousHighCount = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
+      // previousMediumCount = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
+      // previousLowCount = await getInspectorFindingsForImage(previousImageDigest, "LOW");
       previousTotalCount = await getInspectorAllFindingsForImage(previousImageDigest);
       previousOtherCount = previousTotalCount - (previousCriticalCount + previousHighCount + previousMediumCount + previousLowCount);
 
       console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount + "\t" + previousOtherCount + "\t" + previousTotalCount);
+
+      // if (latestCriticalCount > previousCriticalCount) {
+      //   messageDetails.OverallStatus = 'Fail !! Critical Vulnerabilities have increased with the new deployment.';
+      // } else if (latestCriticalCount < previousCriticalCount) {
+      //   messageDetails.OverallStatus = 'Pass !! Critical Vulnerabilities have reduced with the new deployment.';
+      // } else {
+      //   messageDetails.OverallStatus = 'No change in Critical vulnerabilities Count.';
+      // }
+
 
       const newFindings = latestCriticalFindingTitles.filter(title => !previousCriticalFindingTitles.includes(title));
       const resolvedFindings = previousCriticalFindingTitles.filter(title => !latestCriticalFindingTitles.includes(title));
@@ -244,26 +192,10 @@ exports.handler = async (event, context) => {
       if (newFindings > 0) {
         messageDetails.Staus = "NEW_CRITICAL_VULNERABILITY_ADDED"
         messageDetails.NewFindings = `${newFindings.join(', ')}`
-
-        const approvalStatus = 'Rejected';
-        const approvalMessage = `Deployment is Rejected as new Critical Vurnerabilities are added with the latest Image tag ${latestImageTag}`;
-        try {
-          const approvalToken = await getApprovalToken(repositoryName);
-          if (approvalToken !== null) {
-            await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-            console.log(pipelineName + "\t" + approvalMessage + "\t" + approvalStatus)
-          }
-          else {
-            console.log('No approval stage found in the pipeline.');
-          }
-        } catch (error) {
-          console.error('Error sending approval message:', error);
-        }
-
         //send message to SNS that deployment event is not sent
         const params = {
           TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
-          Message: "Deployment Approval is rejected as New Critical Vulnerabilities are added with latest Image tag ",
+          Message: "Image deployment event is not triggered as new vulnerabilities are added",
           Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
         };
 
@@ -272,20 +204,6 @@ exports.handler = async (event, context) => {
         messageDetails.Status = "NO_NEW_CRITICAL_VULNERABILITY_ADDED"
         delete messageDetails.newFindings;
         await sendEventToEventBridge(repositoryName, latestImageTag, messageDetails.Status);
-        const approvalStatus = 'Approved';
-        const approvalMessage = 'Deployment is approved.';
-        try {
-          const approvalToken = await getApprovalToken(repositoryName);
-          if (approvalToken !== null) {
-            await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-            console.log(pipelineName + "\t" + approvalMessage + "\t" + approvalStatus)
-          }
-          else {
-            console.log('No approval stage found in the pipeline.');
-          }
-        } catch (error) {
-          console.error('Error sending approval message:', error);
-        }
       }
 
 
@@ -309,6 +227,8 @@ exports.handler = async (event, context) => {
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
+
+
       await sns.publish(params).promise();
     }
     else {
@@ -346,6 +266,8 @@ exports.handler = async (event, context) => {
 
       await sns.publish(params).promise();
     }
+
+    // await sendEventToEventBridge(truncatedRepoName, latestImageTag, messageDetails.Status);
 
     // Return a success response
     return {
