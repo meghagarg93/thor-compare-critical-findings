@@ -7,7 +7,8 @@ const codepipeline = new AWS.CodePipeline({ region: 'us-west-2' });
 
 const pipelineRepoMapping = {
   'test-aws-inspector-result-output': 'test-inspector-output',
-  'ecrrepositorydashboard-eql8qoibf1cp': 'dls-asgard-thor-Dashboard'
+  'ecrrepositorydashboard-eql8qoibf1cp': 'dls-asgard-thor-Dashboard',
+  'ecrrepositorylearningpath-plihmoedsnb5' : 'dls-asgard-thor-Learningpath'
   // Add more mappings as needed
 };
 
@@ -106,27 +107,6 @@ async function getLatestAndPreviousImageDigest(repositoryName) {
 
 }
 
-async function sendEventToEventBridge(repositoryName, imageTag, status) {
-  const event = {
-    Source: "lambda", // Replace with your event source
-    DetailType: "ImageDeployment",
-    Detail: JSON.stringify({
-      repositoryName: repositoryName,
-      imageTag: imageTag,
-      status: status
-    })
-  };
-
-  const params = {
-    Entries: [event],
-  };
-
-  console.log("event: " + JSON.stringify(event));
-
-  const result = await eventBridge.putEvents(params).promise(); // Wait for the promise to resolve
-  return result;
-}
-
 async function getPipelineNameByRepoName(repositoryName) {
   pipelineName = pipelineRepoMapping[repositoryName];
   if (!pipelineName) {
@@ -154,7 +134,14 @@ async function getApprovalToken(repositoryName) {
           }
         }
         else {
-          console.log('Approval stage not found in the pipeline.');
+          console.log("Approval stage not found in the pipeline");
+          const errorMessage = `Approval stage not found in the pipeline: ${pipelineName}`;
+          const params = {
+            TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+            Message: errorMessage,
+            Subject: `Error in Approving Deployment | Thor | ${latestImageTag}`
+          };
+          await sns.publish(params).promise();
           return null;
         }
         console.log(`Attempt ${retryAttempt}: Approval token not found. Retrying in 1 minute...`);
@@ -165,9 +152,18 @@ async function getApprovalToken(repositoryName) {
         await sleep(retryDelayMilliseconds);
       }
     }
-    throw new Error(`Failed to obtain approval token after ${maxRetryAttempts} attempts.`);
-  } catch (error) {
-    console.error('Error getting pipeline name:', error);
+    throw new Error(` ${pipelineName}  : Failed to obtain approval token after ${maxRetryAttempts} attempts.`);
+  }
+  catch (error) {
+    console.error(error);
+
+    const params = {
+      TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+      Message: `${error}`,
+      Subject: `Error in Approving Deployment | Thor | ${latestImageTag}`
+    };
+    await sns.publish(params).promise();
+
     return null; // Return null to indicate error getting pipeline name
   }
 }
@@ -206,8 +202,6 @@ exports.handler = async (event, context) => {
     var { latestImageDigest, previousImageDigest, latestImageTag, previousImageTag } = await getLatestAndPreviousImageDigest(repositoryName);
 
     // Get the vulnerability counts for the latest image
-    // latestFindingsInfo = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
-
     const { Count: latestCriticalCount, findingTitles: latestCriticalFindingTitles } = await getInspectorFindingsForImage(latestImageDigest, "CRITICAL");
     const { Count: latestHighCount } = await getInspectorFindingsForImage(latestImageDigest, "HIGH");
     const { Count: latestMediumCount } = await getInspectorFindingsForImage(latestImageDigest, "MEDIUM");
@@ -219,7 +213,6 @@ exports.handler = async (event, context) => {
 
     // Compare the counts with the latest-1 image and take appropriate actions
     if (previousImageDigest) {
-
       const { Count: previousCriticalCount, findingTitles: previousCriticalFindingTitles } = await getInspectorFindingsForImage(previousImageDigest, "CRITICAL");
       const { Count: previousHighCount } = await getInspectorFindingsForImage(previousImageDigest, "HIGH");
       const { Count: previousMediumCount } = await getInspectorFindingsForImage(previousImageDigest, "MEDIUM");
@@ -244,50 +237,11 @@ exports.handler = async (event, context) => {
       if (newFindings > 0) {
         messageDetails.Staus = "NEW_CRITICAL_VULNERABILITY_ADDED"
         messageDetails.NewFindings = `${newFindings.join(', ')}`
-
-        const approvalStatus = 'Rejected';
-        const approvalMessage = `Deployment is Rejected as new Critical Vurnerabilities are added with the latest Image tag ${latestImageTag}`;
-        try {
-          const approvalToken = await getApprovalToken(repositoryName);
-          if (approvalToken !== null) {
-            await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-            console.log(pipelineName + "\t" + approvalMessage + "\t" + approvalStatus)
-          }
-          else {
-            console.log('No approval stage found in the pipeline.');
-          }
-        } catch (error) {
-          console.error('Error sending approval message:', error);
-        }
-
-        //send message to SNS that deployment event is not sent
-        const params = {
-          TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
-          Message: "Deployment Approval is rejected as New Critical Vulnerabilities are added with latest Image tag ",
-          Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
-        };
-
       }
       else {
         messageDetails.Status = "NO_NEW_CRITICAL_VULNERABILITY_ADDED"
         delete messageDetails.newFindings;
-        await sendEventToEventBridge(repositoryName, latestImageTag, messageDetails.Status);
-        const approvalStatus = 'Approved';
-        const approvalMessage = 'Deployment is approved.';
-        try {
-          const approvalToken = await getApprovalToken(repositoryName);
-          if (approvalToken !== null) {
-            await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-            console.log(pipelineName + "\t" + approvalMessage + "\t" + approvalStatus)
-          }
-          else {
-            console.log('No approval stage found in the pipeline.');
-          }
-        } catch (error) {
-          console.error('Error sending approval message:', error);
-        }
       }
-
 
       var table = Object.entries(messageDetails)
         .map(([key, value]) => {
@@ -310,9 +264,39 @@ exports.handler = async (event, context) => {
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
       await sns.publish(params).promise();
+
+
+      if (messageDetails.Status == 'NO_NEW_CRITICAL_VULNERABILITY_ADDED') {
+        const approvalStatus = 'Approved';
+        const approvalMessage = 'Deployment is approved.';
+        const approvalToken = await getApprovalToken(repositoryName);
+        if (approvalToken !== null) {
+          await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
+          const params = {
+            TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+            Message: approvalMessage,
+            Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
+          };
+          await sns.publish(params).promise();
+        }
+      }
+      else {
+        const approvalStatus = 'Rejected';
+        const approvalMessage = `Deployment is Rejected as new Critical Vurnerabilities are added with the latest Image tag ${latestImageTag}`;
+        const approvalToken = await getApprovalToken(repositoryName);
+        if (approvalToken !== null) {
+          await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
+          const params = {
+            TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+            Message: approvalMessage,
+            Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
+          };
+          await sns.publish(params).promise();
+        }
+      }
+
     }
     else {
-
       messageDetails.Critical = latestCriticalCount;
       messageDetails.High = latestHighCount;
       messageDetails.Medium = latestMediumCount;
@@ -342,9 +326,8 @@ exports.handler = async (event, context) => {
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
-
-
       await sns.publish(params).promise();
+
     }
 
     // Return a success response
