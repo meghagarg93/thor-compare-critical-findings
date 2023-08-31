@@ -223,6 +223,8 @@ exports.handler = async (event, context) => {
       console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount + "\t" + previousOtherCount + "\t" + previousTotalCount);
 
       const newFindings = latestCriticalFindingTitles.filter(title => !previousCriticalFindingTitles.includes(title));
+      console.log("newFindings : "+ newFindings);
+      console.log("newFindinglength: "  + newFindings.length);
       const resolvedFindings = previousCriticalFindingTitles.filter(title => !latestCriticalFindingTitles.includes(title));
 
       messageDetails.Critical = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
@@ -234,8 +236,8 @@ exports.handler = async (event, context) => {
       messageDetails.latestCriticalFindingTitles = `${latestCriticalFindingTitles.join(', ')}`
       messageDetails.previousCriticalFindingTitles = `${previousCriticalFindingTitles.join(', ')}`
 
-      if (newFindings > 0) {
-        messageDetails.Staus = "NEW_CRITICAL_VULNERABILITY_ADDED"
+      if (newFindings.length > 0) {
+        messageDetails.Status = "NEW_CRITICAL_VULNERABILITY_ADDED"
         messageDetails.NewFindings = `${newFindings.join(', ')}`
       }
       else {
@@ -249,7 +251,7 @@ exports.handler = async (event, context) => {
             value = JSON.stringify(value);
           }
 
-          if (key === 'Inspector_Scan_Event_Latest_Image' | key === 'latestCriticalFindingTitles' | key === 'previousCriticalFindingTitles' | key === 'Status' | key === 'NEW_CRITICAL_VULNERABILITY_ADDED') {
+          if (key === 'Inspector_Scan_Event_Latest_Image' | key === 'latestCriticalFindingTitles' | key === 'previousCriticalFindingTitles' | key === 'Status' | key === 'NewFindings') {
             key = '\n' + `${key}`;
           }
 
