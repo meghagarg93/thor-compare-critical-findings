@@ -8,7 +8,7 @@ const codepipeline = new AWS.CodePipeline({ region: 'us-west-2' });
 const pipelineRepoMapping = {
   'test-aws-inspector-result-output': 'test-inspector-output',
   'ecrrepositorydashboard-eql8qoibf1cp': 'dls-asgard-thor-Dashboard',
-  'ecrrepositorylearningpath-plihmoedsnb5' : 'dls-asgard-thor-Learningpath'
+  'ecrrepositorylearningpath-plihmoedsnb5': 'dls-asgard-thor-Learningpath'
   // Add more mappings as needed
 };
 
@@ -25,17 +25,6 @@ var previousOtherCount;
 const maxRepoNameLength = 80;
 var truncatedRepoName;
 var pipelineName;
-
-var messageDetails = {
-  Critical: '',
-  High: '',
-  Medium: '',
-  Low: '',
-  Other: '',
-  Total: '',
-  Inspector_Scan_Event_Latest_Image: {}
-};
-
 
 async function getInspectorFindingsForImage(imageDigest, severity) {
   // Retrieve the findings for the image from AWS Inspector
@@ -188,6 +177,22 @@ function sleep(milliseconds) {
 }
 
 exports.handler = async (event, context) => {
+
+  var newFindings = [];
+  var resolvedFindings = [];
+  var messageDetails = {
+    Critical: '',
+    High: '',
+    Medium: '',
+    Low: '',
+    Other: '',
+    Total: '',
+    Inspector_Scan_Event_Latest_Image: {},
+    NewFindings: '',
+    ResolvedFindings : ''
+  };
+  
+
   // Retrieve the repository name from the EventBridge event
 
   messageDetails.Inspector_Scan_Event_Latest_Image = event;
@@ -222,10 +227,11 @@ exports.handler = async (event, context) => {
 
       console.log("in Main function: " + previousCriticalCount + "\t" + previousHighCount + "\t" + previousMediumCount + "\t" + previousLowCount + "\t" + previousOtherCount + "\t" + previousTotalCount);
 
-      const newFindings = latestCriticalFindingTitles.filter(title => !previousCriticalFindingTitles.includes(title));
-      console.log("newFindings : "+ newFindings);
-      console.log("newFindinglength: "  + newFindings.length);
-      const resolvedFindings = previousCriticalFindingTitles.filter(title => !latestCriticalFindingTitles.includes(title));
+      newFindings = latestCriticalFindingTitles.filter(title => !previousCriticalFindingTitles.includes(title));
+      console.log("newFindings : " + newFindings);
+      console.log("newFindinglength: " + newFindings.length);
+      resolvedFindings = previousCriticalFindingTitles.filter(title => !latestCriticalFindingTitles.includes(title));
+      console.log("resolvedFindings:  " + resolvedFindings);
 
       messageDetails.Critical = `${latestCriticalCount} (Change = ${latestCriticalCount - previousCriticalCount})`;
       messageDetails.High = `${latestHighCount} (Change = ${latestHighCount - previousHighCount})`;
@@ -239,10 +245,12 @@ exports.handler = async (event, context) => {
       if (newFindings.length > 0) {
         messageDetails.Status = "NEW_CRITICAL_VULNERABILITY_ADDED"
         messageDetails.NewFindings = `${newFindings.join(', ')}`
+        messageDetails.ResolvedFindings = `${resolvedFindings.join(', ')}`
       }
       else {
         messageDetails.Status = "NO_NEW_CRITICAL_VULNERABILITY_ADDED"
-        delete messageDetails.newFindings;
+        delete messageDetails.NewFindings;
+        delete messageDetails.ResolvedFindings;
       }
 
       var table = Object.entries(messageDetails)
@@ -251,7 +259,7 @@ exports.handler = async (event, context) => {
             value = JSON.stringify(value);
           }
 
-          if (key === 'Inspector_Scan_Event_Latest_Image' | key === 'latestCriticalFindingTitles' | key === 'previousCriticalFindingTitles' | key === 'Status' | key === 'NewFindings') {
+          if (key === 'Inspector_Scan_Event_Latest_Image' | key === 'latestCriticalFindingTitles' | key === 'previousCriticalFindingTitles' | key === 'Status' | key === 'NewFindings' | key === 'ResolvedFindings') {
             key = '\n' + `${key}`;
           }
 
