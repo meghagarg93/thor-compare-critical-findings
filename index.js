@@ -4,6 +4,8 @@ const ecr = new AWS.ECR({ region: 'us-west-2' });
 const sns = new AWS.SNS({ region: 'us-west-2' });
 const eventBridge = new AWS.EventBridge({ region: 'us-west-2' });
 const codepipeline = new AWS.CodePipeline({ region: 'us-west-2' });
+const ses = new AWS.SES({ region: 'us-west-2' });
+
 
 const pipelineRepoMapping = {
   'test-aws-inspector-result-output': 'test-inspector-output',
@@ -25,6 +27,53 @@ var previousOtherCount;
 const maxRepoNameLength = 80;
 var truncatedRepoName;
 var pipelineName;
+
+async function sendApprovalRequestEmail(pipelineName,approvalToken) {
+
+console.log("approvalToken"  + approvalToken);
+console.log("pipelineName: " + pipelineName)
+  // Construct the approval links
+  const approveLink = `https://lvqkb1ckhk.execute-api.us-west-2.amazonaws.com/approve?token=${approvalToken}&decision=approve&pipelineName=${pipelineName}`;
+  const rejectLink = `https://lvqkb1ckhk.execute-api.us-west-2.amazonaws.com/reject?token=${approvalToken}&decision=reject&pipelineName=${pipelineName}`;
+
+  // HTML content for the email
+  const htmlContent = `
+      <html>
+      <body>
+          <p>Please <a href="${approveLink}">approve</a> or <a href="${rejectLink}">reject</a> the deployment.</p>
+      </body>
+      </html>
+  `;
+
+  // Send email using Amazon SES
+  const params = {
+    Source: 'megha.garg@comprotechnologies.com',
+      Destination: {
+          ToAddresses: ['megha.garg@comprotechnologies.com']
+      },
+      Message: {
+          Body: {
+              Html: {
+                  Charset: 'UTF-8',
+                  Data: htmlContent
+              }
+          },
+          Subject: {
+              Charset: 'UTF-8',
+              Data: 'Approval Request for Deployment'
+          }
+      }
+  };
+
+  try {
+      await ses.sendEmail(params).promise();
+      console.log('Email sent successfully.');
+      return { success: true, message: 'Email sent successfully.' };
+  } catch (error) {
+      console.error('Error sending email:', error);
+      return { success: false, message: 'Error sending email.' };
+  }
+}
 
 async function getInspectorFindingsForImage(imageDigest, severity) {
   // Retrieve the findings for the image from AWS Inspector
@@ -269,41 +318,52 @@ exports.handler = async (event, context) => {
 
       // Publish the comparison result to the SNS topic
       const params = {
-        TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+        TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email',
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
       await sns.publish(params).promise();
 
+      const approvalToken = await getApprovalToken(repositoryName);
+      console.log("approval token: " + approvalToken);
+      if (approvalToken !== null) {
+      const emailResult = await sendApprovalRequestEmail(pipelineName,approvalToken);
+    
+    if (emailResult.success) {
+        return { statusCode: 200, body: emailResult.message };
+    } else {
+        return { statusCode: 500, body: emailResult.message };
+    }
+  }
 
-      if (messageDetails.Status == 'NO_NEW_CRITICAL_VULNERABILITY_ADDED') {
-        const approvalStatus = 'Approved';
-        const approvalMessage = 'Deployment is approved.';
-        const approvalToken = await getApprovalToken(repositoryName);
-        if (approvalToken !== null) {
-          await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-          const params = {
-            TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
-            Message: approvalMessage,
-            Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
-          };
-          await sns.publish(params).promise();
-        }
-      }
-      else {
-        const approvalStatus = 'Rejected';
-        const approvalMessage = `Deployment is Rejected as new Critical Vurnerabilities are added with the latest Image tag ${latestImageTag}`;
-        const approvalToken = await getApprovalToken(repositoryName);
-        if (approvalToken !== null) {
-          await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
-          const params = {
-            TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
-            Message: approvalMessage,
-            Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
-          };
-          await sns.publish(params).promise();
-        }
-      }
+      // if (messageDetails.Status == 'NO_NEW_CRITICAL_VULNERABILITY_ADDED') {
+      //   const approvalStatus = 'Approved';
+      //   const approvalMessage = 'Deployment is approved.';
+      //   const approvalToken = await getApprovalToken(repositoryName);
+      //   if (approvalToken !== null) {
+      //     await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
+      //     const params = {
+      //       TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+      //       Message: approvalMessage,
+      //       Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
+      //     };
+      //     await sns.publish(params).promise();
+      //   }
+      // }
+      // else {
+      //   const approvalStatus = 'Rejected';
+      //   const approvalMessage = `Deployment is Rejected as new Critical Vurnerabilities are added with the latest Image tag ${latestImageTag}`;
+      //   const approvalToken = await getApprovalToken(repositoryName);
+      //   if (approvalToken !== null) {
+      //     await sendApprovalMessage(pipelineName, approvalToken, approvalStatus, approvalMessage);
+      //     const params = {
+      //       TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+      //       Message: approvalMessage,
+      //       Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
+      //     };
+      //     await sns.publish(params).promise();
+      //   }
+      // }
 
     }
     else {
@@ -332,7 +392,7 @@ exports.handler = async (event, context) => {
 
       // Publish the comparison result to the SNS topic
       const params = {
-        TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_to_Email',
+        TopicArn: 'arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email',
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
