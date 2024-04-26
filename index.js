@@ -324,6 +324,8 @@ exports.handler = async (event, context) => {
       };
       await sns.publish(params).promise();
 
+
+      // get an approval token and send an Email to manually get the approval and rejection using API
       const approvalToken = await getApprovalToken(repositoryName);
       console.log("approval token: " + approvalToken);
       if (approvalToken !== null) {
