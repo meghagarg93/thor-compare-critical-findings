@@ -186,7 +186,7 @@ async function getApprovalToken(repositoryName) {
           console.log("Approval stage not found in the pipeline");
           const errorMessage = `Approval stage not found in the pipeline: ${pipelineName}`;
           const params = {
-            TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_to_Email",
+            TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email",
             Message: errorMessage,
             Subject: `Error in Approving Deployment | Thor | ${latestImageTag}`,
           };
@@ -212,7 +212,7 @@ async function getApprovalToken(repositoryName) {
     console.error(error);
 
     const params = {
-      TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_to_Email",
+      TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email",
       Message: `${error}`,
       Subject: `Error in Approving Deployment | Thor | ${latestImageTag}`,
     };
@@ -467,7 +467,7 @@ exports.handler = async (event, context) => {
 
       // Publish the comparison result to the SNS topic
       const params = {
-        TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_to_Email",
+        TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email",
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
@@ -542,7 +542,7 @@ exports.handler = async (event, context) => {
 
       // Publish the comparison result to the SNS topic
       const params = {
-        TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_to_Email",
+        TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email",
         Message: table,
         Subject: `${truncatedRepoName} | Thor | ${latestImageTag}`,
       };
@@ -558,7 +558,7 @@ exports.handler = async (event, context) => {
     console.error("Error:", error);
 
     const params = {
-      TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_to_Email",
+      TopicArn: "arn:aws:sns:us-west-2:567434252311:Inspector_Final_Email",
       Message: `Repository Name: ${repositoryName}\n\nError while exceuting comparision:\n ${JSON.stringify(
         error
       )}`,
